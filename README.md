@@ -12,3 +12,4 @@ An interactive manual checklist for reviewing application code that talks to MyS
 Open `index.html` in a browser.
 
 To host it with GitHub Pages: Settings > Pages > Deploy from a branch > `main` / root.
+https://ramyareddy1010.github.io/MySQL-Source-Code-Assessment-Checklist/
