@@ -7,4 +7,4 @@ An interactive manual checklist for reviewing application code that talks to MyS
 - Progress is saved in your browser (localStorage)
 - Single self-contained HTML file, no dependencies, works offline
 
-
+https://ramyareddy1010.github.io/MySQL-Source-Code-Assessment-Checklist/
