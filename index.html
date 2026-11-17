@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MySQL Source Code Assessment Checklist</title>
+<style>
+:root{--bg:#f6f8f7;--surface:#fff;--ink:#1c2b33;--mute:#5b6b73;--line:#d5dedb;--accent:#0b6e83;--ok:#2b7a4b;--bad:#a63a2b;--tint:#eef4f3}
+@media (prefers-color-scheme:dark){:root{--bg:#10191d;--surface:#17232a;--ink:#e3ecee;--mute:#94a7ae;--line:#2b3b43;--accent:#4cc3da;--ok:#6fcf97;--bad:#f08a7a;--tint:#1d2c34}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Georgia,"Times New Roman",serif}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:14px 20px;z-index:5}
+.wrap{max-width:880px;margin:0 auto}
+h1{font-size:1.35rem;margin:0 0 4px}
+.hint{font:.85rem system-ui,sans-serif;color:var(--mute);margin:0 0 8px}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .2s}
+.meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font:.85rem system-ui,sans-serif;color:var(--mute);margin-top:6px}
+button{font:.85rem system-ui,sans-serif;background:none;border:1px solid var(--line);color:var(--ink);padding:3px 10px;border-radius:4px;cursor:pointer}
+button:focus-visible,input:focus-visible,summary:focus-visible,.q:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+main{padding:16px 20px 20px}
+details.sec{background:var(--surface);border:1px solid var(--line);border-radius:6px;margin:10px 0}
+summary{cursor:pointer;padding:12px 14px;font-weight:bold;display:flex;justify-content:space-between;gap:10px}
+summary span{font:.85rem system-ui,sans-serif;color:var(--mute);font-weight:normal;white-space:nowrap}
+ul{list-style:none;margin:0;padding:0 14px 8px}
+li{border-top:1px solid var(--line)}
+.row{display:flex;gap:10px;padding:8px 0;align-items:flex-start}
+input[type=checkbox]{margin-top:5px;width:16px;height:16px;accent-color:var(--accent);flex:none}
+.q{all:unset;cursor:pointer;flex:1;display:flex;justify-content:space-between;gap:10px}
+.q:after{content:"+";color:var(--accent);font:1.1rem system-ui,sans-serif}
+.q[aria-expanded=true]:after{content:"\2212"}
+.done .q b{color:var(--mute);text-decoration:line-through;font-weight:normal}
+.q b{font-weight:normal}
+.det{display:none;margin:0 0 10px 26px;padding:10px 12px;background:var(--tint);border-left:3px solid var(--accent);border-radius:4px;font-size:.93rem}
+.det.on{display:block}
+.det p{margin:0 0 8px}.det p:last-child{margin:0}
+.det strong{font-family:system-ui,sans-serif;font-size:.85rem}
+.det .why strong{color:var(--bad)}
+code{font:.82em ui-monospace,Menlo,Consolas,monospace;background:var(--bg);padding:1px 4px;border-radius:3px}
+.grep{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:0 20px 40px;overflow-x:auto}
+.grep pre{margin:6px 0 0;font:.8rem/1.6 ui-monospace,Menlo,Consolas,monospace}
+@media print{header{position:static}.det{display:block}button{display:none}.q:after{content:""}details.sec{break-inside:avoid}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<h1>MySQL source code assessment: manual checklist</h1>
+<p class="hint">Click any item to see what to check and why it is a vulnerability. Tick the box when done.</p>
+<div class="bar"><i id="fill"></i></div>
+<div class="meta"><span id="count"></span><span><button id="toggle">Collapse sections</button> <button id="details">Open all details</button> <button id="reset">Reset</button></span></div>
+</div></header>
+<main class="wrap" id="app"></main>
+<div class="wrap"><div class="grep"><strong>Grep starters</strong>
+<pre>grep -rniE "(select|insert|update|delete).*(\+|\$\{|%s|\.format\(|f\")" .
+grep -rniE "mysql_query|mysqli_query|->query\(|createNativeQuery|\.raw\(|whereRaw" .
+grep -rniE "password\s*=|passwd|DB_PASS|jdbc:mysql://.*password" .
+grep -rniE "INTO OUTFILE|LOAD DATA|multipleStatements|local_infile" .</pre></div></div>
+<script>
+// [title, what to check, why it is vulnerable]
+const data=[
+["Find all database touchpoints",[
+["Grep for DB libraries and calls","Search for <code>mysqli_*</code>, <code>PDO</code>, <code>pymysql</code>, <code>createConnection</code>, <code>JdbcTemplate</code>, <code>.raw(</code>, <code>createNativeQuery</code>. List each file and function that runs a query.","Code you never found cannot be reviewed. Forgotten legacy files and admin scripts often hold the weakest queries."],
+["Grep for SQL keywords","Search for SELECT, INSERT, UPDATE, DELETE, WHERE, ORDER BY, LIMIT, UNION inside strings, including in non-code files (templates, configs, migrations).","Queries hidden in helper libraries or string constants bypass the central data layer and its protections."],
+["Map every entry point to a query","Trace HTTP params, headers, cookies, JSON bodies, uploads, queue messages and CLI args to the queries they reach.","Injection is source-to-sink. Headers like <code>User-Agent</code> and <code>X-Forwarded-For</code> are often logged to the DB without validation."]]],
+["SQL injection",[
+["No string-built queries","Look for <code>+</code>, f-strings, <code>.format()</code>, <code>%</code> formatting or template literals that put user input into SQL text.","The input becomes part of the SQL grammar. Input like <code>' OR 1=1-- </code> changes the query logic, leaking, altering or deleting data (CWE-89)."],
+["Prepared statements everywhere","Confirm every query uses placeholders (<code>?</code>, <code>:name</code>), including admin, reporting and cron code paths.","One unparameterized query is enough. Developers often protect the login form and forget secondary endpoints."],
+["Emulated prepares disabled","In PDO check <code>ATTR_EMULATE_PREPARES=false</code>. In other drivers check whether client-side interpolation is used.","Emulation builds the final SQL string client-side, so escaping bugs (e.g. charset mismatches) can reintroduce injection."],
+["Dynamic identifiers allowlisted","Find user-controlled table, column, <code>ORDER BY</code> and ASC/DESC values. They must be mapped from a fixed allowlist.","Placeholders cannot bind identifiers, so developers concatenate them. Attackers inject subqueries or use <code>ORDER BY</code> for blind data extraction."],
+["LIKE wildcards escaped","Check that <code>%</code> and <code>_</code> in user input are escaped, even when the value is parameterized.","Parameters stop injection but not wildcard abuse: <code>%</code> returns all rows and enables expensive scans or data enumeration."],
+["IN lists use placeholders","Check how lists are built. Placeholders must be generated per item, not joined from raw values.","Joining values such as <code>1,2,3</code> into <code>IN (...)</code> is a classic injection point that is easy to overlook."],
+["LIMIT/OFFSET cast to integers","Verify page and size values are parsed as ints and range-checked before use.","Older code interpolates them directly. Non-integer input can inject SQL or force huge result sets."],
+["Second-order injection","Find data stored from user input (names, profile fields) and later reused in queries built by concatenation.","The payload is harmless on insert and fires later in a different query, so input-time checks miss it."],
+["ORM raw-query escape hatches","Review <code>.raw()</code>, <code>whereRaw</code>, <code>literal</code>, HQL/JPQL and <code>createNativeQuery</code> calls for concatenated input.","ORMs only protect their safe APIs. Raw fragments are plain SQL and just as injectable."],
+["Stored procedures and dynamic SQL","Inspect procedures using <code>CONCAT</code> with <code>PREPARE/EXECUTE</code>. Check that arguments are bound with <code>USING</code>.","Procedures called with parameters can still inject inside themselves when they build SQL from those arguments."],
+["Escaping is not the only defense","Flag reliance on <code>mysql_real_escape_string</code> or <code>addslashes</code>. Check connection charset settings.","Escaping fails with numeric contexts, unquoted values and multibyte charsets like GBK, where a byte can swallow the escape slash."]]],
+["Authentication and authorization",[
+["Login queries safe and hash-based","Check the login query is parameterized and compares a stored hash, not plaintext or a SQL-side comparison of raw input.","Injection into login allows authentication bypass (<code>admin'-- </code>). Plaintext passwords are exposed by any DB leak."],
+["Strong password hashing","Look for bcrypt, argon2 or scrypt with per-user salt. Flag MD5, SHA1, SHA256 without a work factor, or unsalted hashes.","Fast hashes can be cracked in bulk after a breach, and unsalted hashes fall to rainbow tables (CWE-916)."],
+["Object-level ownership checks","Check queries such as <code>WHERE id=? AND user_id=?</code> so users can reach only their own rows.","Without an owner filter, changing an ID in the request exposes other users' records (IDOR, CWE-639)."],
+["Multi-tenant filters on every query","Verify the tenant or org filter is applied in every query, including joins, reports, exports and background jobs.","One missed filter leaks data across customers, which is usually a critical finding."],
+["Role checks server-side","Confirm privileged endpoints verify roles in backend code, not just by hiding UI elements.","Attackers call APIs directly. Hidden buttons give no protection (CWE-285)."]]],
+["Credentials and connection handling",[
+["No hardcoded DB credentials","Search code, configs, Dockerfiles, CI files and git history for passwords and connection strings.","Anyone with repo access, including old contributors and leaked copies, gets direct DB access (CWE-798)."],
+["Secrets from env or vault","Check that secrets are loaded at runtime and rotated, and that <code>.env</code> files are not committed.","Secrets in source spread to every clone, log and build artifact and are hard to rotate."],
+["Least-privilege DB user","Check grants for the app account: no <code>root</code>, <code>FILE</code>, <code>SUPER</code>, <code>GRANT OPTION</code> or access to other schemas.","After an injection, a powerful account lets the attacker read files, write webshells or drop databases."],
+["Separate read and write accounts","Check whether read-only features (reports, search) use a read-only account.","Limits the damage if a read-only endpoint is injectable."],
+["TLS on DB connections","Check for <code>ssl-mode=REQUIRED</code> or <code>VERIFY_IDENTITY</code> in the connection settings.","Plaintext traffic exposes credentials and data to sniffing and man-in-the-middle attacks."],
+["Pooling and connection closing","Check that connections are released in <code>finally</code> blocks and pool limits are set.","Leaks exhaust connections, enabling denial of service under load."],
+["DB not publicly exposed","Check host config, security groups and bind-address: the DB should be reachable only from app servers.","An internet-facing MySQL port invites brute force and exploitation of server vulnerabilities."]]],
+["Data protection",[
+["Sensitive fields protected","Check PII, tokens and card data are encrypted or tokenized and that keys are stored separately.","Plaintext columns turn any SQLi or backup leak into a full data breach."],
+["No sensitive data in logs","Check query and application logging for bound values, passwords and tokens.","Logs are widely readable and long-lived, so secrets in them spread beyond the DB."],
+["No dumps or backups in repo/web root","Search for <code>.sql</code>, <code>.dump</code>, <code>.bak</code> files in the repo and public directories.","Dumps can be downloaded by URL and expose the whole database, including hashes."],
+["Avoid SELECT * in responses","Check APIs return only needed columns, not whole rows serialized to JSON.","Extra columns (hashes, internal flags, emails) leak to the client (CWE-200)."],
+["Data minimization and retention","Check for deletion and retention rules and that only necessary data is collected.","Data you keep is data that can be stolen, and it also creates compliance risk."]]],
+["Error handling and information leakage",[
+["No raw MySQL errors to users","Check that exception messages and stack traces are not returned in responses.","Errors reveal table names, query structure and versions, which speeds up error-based injection (CWE-209)."],
+["Debug modes off in production","Check debug flags, verbose ORM logging and profiler toolbars in prod configs.","Debug pages expose queries, config and sometimes credentials."],
+["Generic client errors","Check clients get a generic message and a correlation ID, with details only in server logs.","Detailed errors help attackers, while generic ones keep support workable."],
+["Blind injection signals","Look for differences in response content or timing that depend on query results.","Even without error output, attackers infer data bit by bit from true/false or delayed responses."]]],
+["Input validation and data integrity",[
+["Server-side validation","Check type, length, format and range checks happen on the server for every field.","Client-side checks are trivially bypassed, so bad data reaches the DB and logic."],
+["Schema constraints","Check <code>NOT NULL</code>, <code>UNIQUE</code>, foreign keys and correct column types and lengths.","Missing constraints allow duplicates, orphaned rows and inconsistent state that can be abused."],
+["Strict SQL mode","Check <code>sql_mode</code> includes <code>STRICT_TRANS_TABLES</code>.","Non-strict mode silently truncates or coerces values, which has caused bypasses such as duplicate-username truncation."],
+["Consistent charset (utf8mb4)","Check connection, table and column charset and collation match.","Mismatches enable encoding tricks, collation-based account collisions and escaping bypasses."],
+["No mass assignment","Check bulk insert or update from request bodies uses field allowlists.","Users can set <code>role</code>, <code>is_admin</code> or <code>balance</code> by adding extra fields (CWE-915)."]]],
+["Transactions and concurrency",[
+["Transactions with rollback","Check multi-step changes use a transaction and roll back on any error.","Partial failures leave inconsistent data, such as money debited but not credited."],
+["Race conditions handled","Look at check-then-update flows (balance, coupons, stock). Use <code>SELECT ... FOR UPDATE</code> or atomic <code>UPDATE</code> with conditions.","Parallel requests pass the same check, causing double spend or repeated coupon use (CWE-362)."],
+["Isolation level appropriate","Check the isolation level matches the business logic's needs.","Weak isolation allows non-repeatable or phantom reads that break validations."],
+["Deadlock and retry handling","Check for retry logic and consistent lock ordering.","Unhandled deadlocks cause failed requests and can be triggered to degrade service."]]],
+["Availability and abuse resistance",[
+["Pagination with max size","Check page size is capped server-side.","Requesting <code>limit=10000000</code> exhausts memory and DB resources."],
+["No unbounded or costly queries","Check leading-wildcard <code>LIKE</code>, huge <code>IN</code> lists and unindexed user-driven filters.","Cheap requests trigger full table scans, enabling denial of service."],
+["Indexes and N+1 patterns","Review slow query log and loops that run one query per item.","Poor performance amplifies any load-based attack."],
+["Query timeouts","Check <code>max_execution_time</code> or driver timeouts are set.","Long queries hold connections and locks, and time-based injection relies on delays running freely."],
+["Rate limiting","Check search, login and export endpoints are rate limited.","Allows brute force, scraping and automated injection."]]],
+["Dangerous MySQL features",[
+["LOAD DATA LOCAL INFILE","Check <code>local_infile</code> is disabled unless needed and never uses user-influenced paths.","A malicious or compromised server can read client files, and injection can load arbitrary files into tables."],
+["INTO OUTFILE / DUMPFILE","Search app code for these. Check <code>secure_file_priv</code> is restricted.","Injection can write files such as webshells to the server."],
+["FILE privilege","Check the app user lacks <code>FILE</code>.","<code>FILE</code> allows reading server files like <code>/etc/passwd</code> via <code>LOAD_FILE()</code> and writing files."],
+["UDFs and sys_exec","Check for loaded UDFs and ability to write to the plugin directory.","UDF loading gives OS command execution from SQL."],
+["Multi-statements disabled","Check <code>multipleStatements</code> or <code>CLIENT_MULTI_STATEMENTS</code> is off.","Stacked queries (<code>; DROP TABLE ...</code>) turn a simple injection into full control."]]],
+["Schema, migrations and stored code",[
+["No default or test accounts","Review migrations and seeds for admin users, test data and weak passwords.","Seeded credentials often reach production and are widely known."],
+["Safe DEFINER usage","Review <code>DEFINER</code> and <code>SQL SECURITY</code> on procedures, views and events.","Definer-rights routines run with the creator's privileges, enabling privilege escalation."],
+["Triggers and events","Read trigger and event bodies for side effects and dynamic SQL.","Hidden logic can alter data or run unsafe SQL unnoticed."],
+["Views limit exposed columns","Check views don't expose sensitive columns to low-privilege users.","Views meant for convenience can bypass column-level restrictions."]]],
+["Dependencies and configuration",[
+["Drivers and ORM up to date","Run <code>npm audit</code>, <code>pip-audit</code> or OWASP Dependency-Check on DB libraries.","Known CVEs in drivers can allow injection, RCE or protocol attacks."],
+["MySQL server patched","Check the server version is supported and patched.","Old versions have public exploits for privilege escalation and crashes."],
+["Server hardening","Check <code>skip_name_resolve</code>, <code>secure_file_priv</code>, <code>validate_password</code>, and that anonymous users and the <code>test</code> DB are removed.","Default settings leave weak accounts and file access open."],
+["Logging configured safely","Check audit and general logs are enabled where needed and don't capture secrets.","Without logs attacks go unnoticed, and with careless logs they leak data."]]],
+["Evidence and reporting",[
+["File, line and function","Note exact location for each finding.","Lets developers reproduce and fix quickly."],
+["Source-to-sink flow","Document how input travels to the query.","Shows exploitability and justifies severity."],
+["Proof of concept","Include a safe payload or clear reasoning.","Turns a suspicion into a confirmed finding."],
+["Severity and CWE","Assign CVSS and CWE (89 SQLi, 798 hardcoded creds, 209 error leakage, 639 IDOR).","Enables consistent prioritization."],
+["Recommended fix","Give a concrete fix: parameterization, allowlist, least privilege.","Findings without fixes are slower to close."]]]
+];
+const KEY="mysql-checklist-v2";
+let state={};
+try{state=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+const app=document.getElementById("app");
+data.forEach((s,i)=>{
+ const d=document.createElement("details");d.className="sec";d.open=true;
+ let h=`<summary>${i+1}. ${s[0]}<span></span></summary><ul>`;
+ s[1].forEach((t,j)=>{const id=i+"-"+j;
+  h+=`<li class="${state[id]?"done":""}"><div class="row"><input type="checkbox" data-id="${id}" aria-label="Mark done"${state[id]?" checked":""}><button class="q" aria-expanded="false"><b>${t[0]}</b></button></div><div class="det"><p><strong>What to check.</strong> ${t[1]}</p><p class="why"><strong>Why it is vulnerable.</strong> ${t[2]}</p></div></li>`});
+ d.innerHTML=h+"</ul>";app.appendChild(d);
+});
+function update(){
+ const all=[...document.querySelectorAll("input[type=checkbox]")];
+ const n=all.filter(c=>c.checked).length;
+ fill.style.width=(100*n/all.length)+"%";
+ count.textContent=n+" of "+all.length+" checked";
+ document.querySelectorAll("details.sec").forEach(d=>{
+  const c=[...d.querySelectorAll("input")];
+  d.querySelector("summary span").textContent=c.filter(x=>x.checked).length+"/"+c.length});
+}
+app.addEventListener("change",e=>{
+ if(e.target.type!=="checkbox")return;
+ state[e.target.dataset.id]=e.target.checked;
+ e.target.closest("li").classList.toggle("done",e.target.checked);
+ try{localStorage.setItem(KEY,JSON.stringify(state))}catch(_){}
+ update();
+});
+app.addEventListener("click",e=>{
+ const q=e.target.closest(".q");if(!q)return;
+ const on=q.closest("li").querySelector(".det").classList.toggle("on");
+ q.setAttribute("aria-expanded",on);
+});
+let secOpen=true,detOpen=false;
+toggle.onclick=()=>{secOpen=!secOpen;document.querySelectorAll("details.sec").forEach(d=>d.open=secOpen);toggle.textContent=secOpen?"Collapse sections":"Expand sections"};
+details.onclick=()=>{detOpen=!detOpen;
+ document.querySelectorAll(".det").forEach(d=>d.classList.toggle("on",detOpen));
+ document.querySelectorAll(".q").forEach(q=>q.setAttribute("aria-expanded",detOpen));
+ details.textContent=detOpen?"Close all details":"Open all details"};
+reset.onclick=()=>{if(!confirm("Clear all checks?"))return;
+ state={};try{localStorage.removeItem(KEY)}catch(_){}
+ document.querySelectorAll("input[type=checkbox]").forEach(c=>{c.checked=false;c.closest("li").classList.remove("done")});update()};
+update();
+</script>
+</body>
+</html>
